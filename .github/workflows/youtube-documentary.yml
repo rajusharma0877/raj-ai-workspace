@@ -19,7 +19,7 @@ on:
         default: How ordinary Romans lived, ate, worked and slept
         type: string
       model:
-        description: FreeLLMAPI model or router alias
+        description: FreeLLMAPI model ID or router alias
         required: true
         default: auto
         type: string
@@ -30,66 +30,26 @@ permissions:
 jobs:
   build-pack:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate setup secret
+      - name: Check FreeLLMAPI connection
         env:
-          CONFIG: ${{ secrets.FREEAPI_CONFIG_JSON }}
+          BASE_URL: ${{ secrets.FREELLMAPI_BASE_URL }}
+          API_KEY: ${{ secrets.FREELLMAPI_API_KEY }}
         run: |
           set -euo pipefail
-          test -n "$CONFIG" || { echo "::error::Add FREEAPI_CONFIG_JSON in repository Actions secrets"; exit 1; }
-          python3 -c 'import json,os; c=json.loads(os.environ["CONFIG"]); assert isinstance(c.get("admin"),dict); assert c.get("keys"), "Add at least one provider key in keys[]"'
-
-      - name: Start temporary FreeLLMAPI
-        env:
-          FREEAPI_CONFIG_JSON: ${{ secrets.FREEAPI_CONFIG_JSON }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/freeapi-data"
-          ENCRYPTION_KEY="$(openssl rand -hex 32)"
-          docker pull ghcr.io/tashfeenahmed/freellmapi:latest
-          docker run -d --name freellmapi \
-            -p 127.0.0.1:3001:3001 \
-            -v "$RUNNER_TEMP/freeapi-data:/app/server/data" \
-            -e PORT=3001 \
-            -e ENCRYPTION_KEY="$ENCRYPTION_KEY" \
-            -e FREEAPI_CONFIG_JSON="$FREEAPI_CONFIG_JSON" \
-            ghcr.io/tashfeenahmed/freellmapi:latest
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3001/ >/dev/null; then
-              echo "FreeLLMAPI dashboard/API is responding"
-              break
-            fi
-            if [ "$i" -eq 60 ]; then docker logs freellmapi; exit 1; fi
-            sleep 2
-          done
-          docker logs freellmapi --tail 30
-
-      - name: Read temporary unified key
-        run: |
-          python3 - <<'PY' >> "$GITHUB_ENV"
-          import sqlite3, os
-          db = os.path.join(os.environ["RUNNER_TEMP"], "freeapi-data", "freeapi.db")
-          con = sqlite3.connect(db)
-          row = con.execute("SELECT value FROM settings WHERE key='unified_api_key'").fetchone()
-          con.close()
-          if not row or not row[0]:
-              raise SystemExit("FreeLLMAPI unified key was not created; inspect container logs.")
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write("FREELLMAPI_TEMP_KEY=" + row[0] + "\n")
-          PY
-
+          test -n "$BASE_URL" && test -n "$API_KEY"
+          case "$BASE_URL" in https://*) ;; *) echo "::error::HTTPS URL required"; exit 1;; esac
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $API_KEY" "${BASE_URL%/}/v1/models" >/dev/null
       - name: Install Hermes
         run: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup
-
       - name: Configure Hermes
         env:
-          API_KEY: ${{ env.FREELLMAPI_TEMP_KEY }}
+          BASE_URL: ${{ secrets.FREELLMAPI_BASE_URL }}
+          API_KEY: ${{ secrets.FREELLMAPI_API_KEY }}
           MODEL: ${{ inputs.model }}
-        run: npx --yes freellmapi setup-hermes --url http://127.0.0.1:3001 --api-key "$API_KEY" --model "$MODEL"
-
+        run: npx --yes freellmapi setup-hermes --url "$BASE_URL" --api-key "$API_KEY" --model "$MODEL"
       - name: Generate documentary pack
         env:
           LANGUAGE: ${{ inputs.language }}
@@ -100,17 +60,11 @@ jobs:
           mkdir -p projects/youtube/output
           TASK="Read agents/hermes/AGENT.md, projects/youtube/README.md and projects/youtube/prompts/episode-pack.md. Produce a complete original 10–15 minute documentary pack in $LANGUAGE. Topic: $TOPIC. Angle: $ANGLE. Save it as projects/youtube/output/episode-pack.md. Never invent citations; mark unverifiable claims VERIFY BEFORE RECORDING."
           hermes -z "$TASK"
-
       - name: Validate pack
         run: python3 scripts/validate_pack.py projects/youtube/output/episode-pack.md
-
       - name: Upload pack
         uses: actions/upload-artifact@v4
         with:
           name: youtube-production-pack
           path: projects/youtube/output/episode-pack.md
           if-no-files-found: error
-
-      - name: Stop temporary gateway
-        if: always()
-        run: docker rm -f freellmapi || true
