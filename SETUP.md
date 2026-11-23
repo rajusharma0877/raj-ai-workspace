@@ -1,45 +1,51 @@
-# Setup — connect FreeLLMAPI first, add models later
+# Setup — FreeLLMAPI + Hermes (mobile-friendly)
 
-This workspace connects Hermes to an already-running FreeLLMAPI instance. You do **not** need to add a provider/model key just to test the connection. The initial model setting is `auto`.
+The repository now includes a temporary FreeLLMAPI host workflow. It starts the official FreeLLMAPI Docker image on a GitHub Actions runner and exposes it through a temporary HTTPS tunnel. You can start and stop it from the GitHub mobile app.
 
-Important distinction: FreeLLMAPI is an API gateway/router, not an inference model itself. Its unified API key authenticates requests to the gateway. Actual chat generation needs at least one provider key/model enabled in that FreeLLMAPI instance. Until then, the workflow can verify the gateway, authentication, and model catalog, but a real chat test may return “no available provider/model”.
+The default model is `auto`. You do not need a provider/model key just to create the gateway account or obtain its unified API key. Real chat generation will work after a provider is enabled later.
 
-## Step 1 — FreeLLMAPI must be running
+## 1. Add admin login secrets once
 
-Start FreeLLMAPI wherever you intend to host it. It must remain reachable from GitHub Actions over HTTPS while a workflow runs. A local-only `localhost` address on your phone/computer will not be reachable from GitHub's cloud runner.
+Open **Repository → Settings → Secrets and variables → Actions → New repository secret** and add:
 
-In the FreeLLMAPI dashboard, copy:
-- the reachable HTTPS server URL (base URL, without `/v1`)
-- the unified API key from the Keys page
+- `FREELLMAPI_ADMIN_EMAIL` — the email you want to use for the FreeLLMAPI dashboard.
+- `FREELLMAPI_ADMIN_PASSWORD` — a strong password of at least 8 characters.
 
-The unified key is not a provider key. You can add provider keys/models later in the FreeLLMAPI dashboard.
+These are used to provision the first dashboard account. They are not provider keys and are not printed in workflow logs.
 
-## Step 2 — Add two GitHub Actions secrets
+## 2. Start the FreeLLMAPI host
 
-Open **Repository → Settings → Secrets and variables → Actions → New repository secret**.
+In GitHub mobile:
 
-1. `FREELLMAPI_BASE_URL` — your reachable HTTPS FreeLLMAPI URL, e.g. `https://your-host.example` (do not use the example literally).
-2. `FREELLMAPI_API_KEY` — the unified API key copied from the FreeLLMAPI dashboard.
+1. Open this repository → **Actions**.
+2. Select **FreeLLMAPI Temporary Host**.
+3. Tap **Run workflow** and keep model as `auto`.
+4. Open the completed/running workflow run and expand **Summary**.
+5. Copy the HTTPS Dashboard / API address shown there.
 
-Never paste the API key into workflow inputs, source files, or chat.
+The host stays online while that workflow run is active. Stop the run when finished. This is a temporary session, not persistent hosting; a new run creates a fresh instance.
 
-## Step 3 — Test the connection first
+## 3. Get the unified API key
 
-Open **Actions → FreeLLMAPI Connection Check → Run workflow**. Leave model as `auto`.
+Open the HTTPS address from the workflow Summary and sign in with the admin email/password you saved in Step 1. On the FreeLLMAPI Keys page, copy the unified API key from the page header.
 
-This checks:
-- HTTPS endpoint reachability
-- unified-key authentication against `/v1/models`
-- model catalog response
-- optional real chat inference
+The unified key is the gateway credential. It is separate from any provider/model key.
 
-If no provider/model is configured yet, catalog/auth can pass while the chat probe reports that no model is available. That is expected; add a provider key/model later in FreeLLMAPI and rerun the check.
+## 4. Connect the repository workflows
 
-## Step 4 — Run Hermes
+Add these two more repository Actions secrets:
 
-After connection check passes, open **Actions → Hermes Task → Run workflow** or **YouTube Documentary Pack → Run workflow**. Leave model as `auto` to let FreeLLMAPI choose from the enabled pool.
+- `FREELLMAPI_BASE_URL` — the HTTPS address from the workflow Summary, without a trailing slash and without `/v1`.
+- `FREELLMAPI_API_KEY` — the unified API key from the FreeLLMAPI dashboard.
 
-Hermes is installed in the temporary GitHub Actions runner and configured using the official `freellmapi setup-hermes` command. The runner does not host FreeLLMAPI; it connects to your reachable instance.
+Then run **Actions → FreeLLMAPI Connection Check** with model `auto`. After it passes, run **Hermes Task** or **YouTube Documentary Pack**.
 
-## Free-first limits
-GitHub Actions and upstream provider quotas have limits. No paid fallback is configured. A successful gateway check alone does not prove a model can generate until at least one provider is enabled.
+## 5. Add a model later
+
+When ready, add a provider key/model inside the FreeLLMAPI dashboard. The unified API key remains the gateway key; it is not a replacement for a provider key.
+
+## Free-first notes
+
+- Official image: `ghcr.io/tashfeenahmed/freellmapi:latest`.
+- Data is held in the runner's Docker volume for that session; this temporary host does not provide durable storage between runs.
+- No paid provider fallback is configured.
