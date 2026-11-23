@@ -1,0 +1,114 @@
+name: FreeLLMAPI Temporary Host
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Default model (keep auto)"
+        required: true
+        default: "auto"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freellmapi-temporary-host
+  cancel-in-progress: true
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          ADMIN_EMAIL: ${{ secrets.FREELLMAPI_ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.FREELLMAPI_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$ADMIN_EMAIL" ]] || { echo "::error::Add repository secret FREELLMAPI_ADMIN_EMAIL"; exit 1; }
+          [[ -n "$ADMIN_PASSWORD" ]] || { echo "::error::Add repository secret FREELLMAPI_ADMIN_PASSWORD"; exit 1; }
+          [[ ${#ADMIN_PASSWORD} -ge 8 ]] || { echo "::error::FREELLMAPI_ADMIN_PASSWORD must be at least 8 characters"; exit 1; }
+
+      - name: Start FreeLLMAPI
+        shell: bash
+        env:
+          ADMIN_EMAIL: ${{ secrets.FREELLMAPI_ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.FREELLMAPI_ADMIN_PASSWORD }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          set -euo pipefail
+          ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          printf '::add-mask::%s\n' "$ENCRYPTION_KEY"
+          CONFIG="$(ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" node -e 'process.stdout.write(JSON.stringify({admin:{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD}}))')"
+          printf '::add-mask::%s\n' "$ADMIN_PASSWORD"
+          docker run -d --name freellmapi \
+            --restart=no \
+            -p 127.0.0.1:3001:3001 \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e ENCRYPTION_KEY="$ENCRYPTION_KEY" \
+            -e FREEAPI_CONFIG_JSON="$CONFIG" \
+            -v freellmapi-data:/app/server/data \
+            ghcr.io/tashfeenahmed/freellmapi:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3001/ >/dev/null; then
+              echo "FreeLLMAPI is responding."
+              exit 0
+            fi
+            sleep 3
+          done
+          docker logs freellmapi
+          exit 1
+
+      - name: Install Cloudflare Tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+          chmod +x /usr/local/bin/cloudflared
+
+      - name: Publish temporary HTTPS address
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3001 > /tmp/cloudflared.log 2>&1 &
+          for i in $(seq 1 60); do
+            URL="$(grep -Eo 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n 1 || true)"
+            if [[ -n "$URL" ]]; then
+              {
+                echo "## FreeLLMAPI is online"
+                echo
+                echo "**Dashboard / API:** $URL"
+                echo
+                echo "Sign in using the admin email and password stored in your repository Actions secrets."
+                echo "Use this base URL in the connection-check workflow. Keep model set to `auto`."
+                echo
+                echo "This address is temporary and works only while this workflow run is active."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "FreeLLMAPI HTTPS endpoint is ready."
+              break
+            fi
+            sleep 2
+          done
+          [[ -n "${URL:-}" ]] || { cat /tmp/cloudflared.log; echo "::error::Tunnel did not start"; exit 1; }
+
+      - name: Keep service alive
+        shell: bash
+        run: |
+          echo "FreeLLMAPI is running. Stop this workflow to shut it down."
+          while true; do
+            if ! curl -fsS http://127.0.0.1:3001/ >/dev/null; then
+              echo "::error::FreeLLMAPI health check failed"
+              docker logs freellmapi
+              exit 1
+            fi
+            sleep 60
+          done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f freellmapi 2>/dev/null || true
