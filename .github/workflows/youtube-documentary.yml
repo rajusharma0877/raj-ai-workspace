@@ -1,0 +1,67 @@
+name: YouTube Documentary Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      language:
+        description: Output language
+        required: true
+        type: choice
+        options: [Hindi, English]
+      topic:
+        description: Episode topic
+        required: true
+        default: Everyday life in Ancient Rome
+        type: string
+      angle:
+        description: Specific story angle
+        required: true
+        default: How ordinary Romans lived, ate, worked and slept
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check gateway secrets
+        env:
+          BASE_URL: ${{ secrets.FREELLMAPI_BASE_URL }}
+          API_KEY: ${{ secrets.FREELLMAPI_API_KEY }}
+          MODEL: ${{ secrets.FREELLMAPI_MODEL }}
+        run: |
+          set -euo pipefail
+          test -n "$BASE_URL" || { echo "::error::Missing FREELLMAPI_BASE_URL"; exit 1; }
+          test -n "$API_KEY" || { echo "::error::Missing FREELLMAPI_API_KEY"; exit 1; }
+          test -n "$MODEL" || { echo "::error::Missing FREELLMAPI_MODEL"; exit 1; }
+          case "$BASE_URL" in https://*) ;; *) echo "::error::FreeLLMAPI URL must use HTTPS"; exit 1;; esac
+      - name: Install Hermes
+        run: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup
+      - name: Configure Hermes with FreeLLMAPI
+        env:
+          BASE_URL: ${{ secrets.FREELLMAPI_BASE_URL }}
+          API_KEY: ${{ secrets.FREELLMAPI_API_KEY }}
+          MODEL: ${{ secrets.FREELLMAPI_MODEL }}
+        run: npx --yes freellmapi setup-hermes --url "$BASE_URL" --api-key "$API_KEY" --model "$MODEL"
+      - name: Generate pack
+        env:
+          LANGUAGE: ${{ inputs.language }}
+          TOPIC: ${{ inputs.topic }}
+          ANGLE: ${{ inputs.angle }}
+        run: |
+          set -euo pipefail
+          mkdir -p projects/youtube/output
+          TASK="Read agents/hermes/AGENT.md, projects/youtube/README.md and projects/youtube/prompts/episode-pack.md. Produce a complete original 10–15 minute documentary pack in $LANGUAGE. Topic: $TOPIC. Angle: $ANGLE. Save it as projects/youtube/output/episode-pack.md. Never invent citations; mark unverifiable claims VERIFY BEFORE RECORDING."
+          hermes -z "$TASK"
+      - name: Validate pack
+        run: python3 scripts/validate_pack.py projects/youtube/output/episode-pack.md
+      - name: Upload pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-production-pack
+          path: projects/youtube/output/episode-pack.md
+          if-no-files-found: error
