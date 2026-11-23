@@ -1,0 +1,74 @@
+name: FreeLLMAPI Connection Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model ID or auto router alias
+        required: true
+        default: auto
+        type: string
+      test_chat:
+        description: Attempt a real chat request (needs an enabled provider/model)
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check endpoint and API authentication
+        env:
+          BASE_URL: ${{ secrets.FREELLMAPI_BASE_URL }}
+          API_KEY: ${{ secrets.FREELLMAPI_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          TEST_CHAT: ${{ inputs.test_chat }}
+        run: |
+          set -euo pipefail
+          test -n "$BASE_URL" || { echo "::error::Add FREELLMAPI_BASE_URL secret"; exit 1; }
+          test -n "$API_KEY" || { echo "::error::Add FREELLMAPI_API_KEY secret"; exit 1; }
+          case "$BASE_URL" in https://*) ;; *) echo "::error::Use a reachable HTTPS URL"; exit 1;; esac
+          BASE_URL="${BASE_URL%/}"
+          echo "Checking FreeLLMAPI model catalog..."
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $API_KEY" \
+            "$BASE_URL/v1/models" -o /tmp/models.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open("/tmp/models.json"))
+          data=d.get("data", d.get("models", []))
+          print("Gateway authentication: PASS")
+          print("Catalog response: PASS")
+          print("Visible model entries:", len(data) if isinstance(data,list) else "response received")
+          PY
+          if [ "$TEST_CHAT" = "true" ]; then
+            echo "Attempting one minimal chat request..."
+            code="$(curl --silent --show-error -o /tmp/chat.json -w '%{http_code}' \
+              -H "Authorization: Bearer $API_KEY" \
+              -H "Content-Type: application/json" \
+              "$BASE_URL/v1/chat/completions" \
+              -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: FreeLLMAPI connection OK\"}],\"max_tokens\":40}")"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+              echo "Chat inference: PASS"
+              python3 - <<'PY'
+          import json
+          d=json.load(open("/tmp/chat.json"))
+          print(d.get("choices",[{}])[0].get("message",{}).get("content","(empty response)"))
+          PY
+            else
+              echo "::warning::Gateway auth/catalog passed, but chat inference returned HTTP $code. This usually means no provider/model is enabled yet, or the chosen model is unavailable."
+              python3 - <<'PY'
+          import json
+          try:
+              d=json.load(open("/tmp/chat.json"))
+              print("Provider response:", d.get("error", d))
+          except Exception:
+              print(open("/tmp/chat.json").read()[:1000])
+          PY
+            fi
+          fi
