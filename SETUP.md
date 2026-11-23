@@ -1,22 +1,50 @@
-# Setup
+# Setup — zero-hosting mode
 
-## Runtime model
-GitHub Actions runners are temporary. They cannot host a permanent FreeLLMAPI service. This workspace therefore needs a reachable FreeLLMAPI HTTPS endpoint while a workflow runs.
+This workspace runs FreeLLMAPI and Hermes together inside each GitHub Actions job. Both are temporary: the gateway starts for the job and is discarded when it ends. No VPS, paid hosting, local model, or permanent public endpoint is required.
 
-## Repository secrets
-Open **Settings → Secrets and variables → Actions → New repository secret** and add:
-- `FREELLMAPI_BASE_URL`: HTTPS origin/base URL of your running FreeLLMAPI instance.
-- `FREELLMAPI_API_KEY`: unified API key created by that instance.
-- `FREELLMAPI_MODEL`: model ID enabled on that instance.
+## One required secret
 
-Never commit provider keys, admin passwords, or API keys.
+Open **Repository → Settings → Secrets and variables → Actions → New repository secret**.
 
-## FreeLLMAPI and Hermes
-Deploy FreeLLMAPI using its official documentation, configure at least one provider key, then create its unified API key. The workflow installs Hermes in its temporary runner and uses the official `freellmapi setup-hermes` command to connect it.
+Create `FREEAPI_CONFIG_JSON`. Its value must be valid JSON in FreeLLMAPI's declarative startup format, containing your dashboard admin and at least one provider API key. Example shape (replace every placeholder; never paste this example unchanged):
 
-A free provider quota does not mean unlimited inference. No paid fallback is configured.
+```json
+{
+  "admin": {
+    "email": "your-email@example.com",
+    "password": "a-unique-password-at-least-8-characters"
+  },
+  "keys": [
+    {
+      "platform": "google",
+      "key": "YOUR_PROVIDER_API_KEY",
+      "label": "primary-free-key",
+      "enabled": true
+    }
+  ],
+  "routing": {
+    "strategy": "balanced"
+  }
+}
+```
+
+Use a provider that offers a free API quota in your region. Provider signup and quota policies are separate from FreeLLMAPI; no unlimited free inference is promised. Do not send API keys in chat or commit them to files.
+
+## How the workflow runs
+
+1. GitHub Actions starts a temporary Ubuntu runner.
+2. Docker starts the official FreeLLMAPI container with a temporary database and encryption key.
+3. The workflow reads the newly generated unified API key from the temporary SQLite settings database.
+4. Hermes is installed and configured with the local gateway using the official `freellmapi setup-hermes` command.
+5. Hermes generates the requested task output; the output is uploaded as a workflow artifact.
+6. The runner, gateway, and temporary database are discarded when the job ends. Provider keys remain only in the GitHub Actions secret.
 
 ## Run a YouTube pack
-Go to **Actions → YouTube Documentary Pack → Run workflow**. Select Hindi or English, enter a topic and angle. Download the `youtube-production-pack` artifact after a successful run.
 
-The workflow produces a written production pack; it does not render a finished video or publish automatically. Human review is required.
+Open **Actions → YouTube Documentary Pack → Run workflow**. Select Hindi or English, then enter the topic and angle. Download the `youtube-production-pack` artifact.
+
+The output is a written production pack, not a rendered video. Human review and editing are still required; publishing is never automatic.
+
+## Free-first limits
+
+GitHub Actions usage and provider free quotas are subject to account/provider limits. If the provider quota is exhausted, the run may fail. No paid fallback is configured.
