@@ -1,11 +1,17 @@
+# Secrets and Hermes runtime state
 .env
 .env.*
 !.env.example
-*.sqlite
-*.sqlite3
-*.db
 .hermes/
-output/
+**/.hermes/
+*.token
+*.secret
+secrets/
+credentials/
+
+# Local/editor/runtime files
+.DS_Store
+.vscode/
+.idea/
 __pycache__/
 *.py[cod]
-.DS_Store

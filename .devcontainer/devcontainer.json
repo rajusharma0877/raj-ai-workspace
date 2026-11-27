@@ -1,14 +1,23 @@
 {
-  "name": "Hermes Agent (GitHub Codespaces)",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "forwardPorts": [9120],
-  "portsAttributes": {
-    "9120": {
-      "label": "Hermes Webapp",
-      "onAutoForward": "notify",
-      "visibility": "private"
+  "name": "Hermes Agent",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "username": "vscode"
     }
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [8642, 9119],
+  "portsAttributes": {
+    "8642": {
+      "label": "Hermes Gateway API",
+      "onAutoForward": "notify"
+    },
+    "9119": {
+      "label": "Hermes Dashboard (if enabled)",
+      "onAutoForward": "notify"
+    }
+  },
   "remoteUser": "vscode"
 }

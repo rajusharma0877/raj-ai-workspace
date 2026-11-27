@@ -1,51 +1,83 @@
-# Setup — FreeLLMAPI + Hermes (mobile-friendly)
+# Setup and operating notes
 
-The repository now includes a temporary FreeLLMAPI host workflow. It starts the official FreeLLMAPI Docker image on a GitHub Actions runner and exposes it through a temporary HTTPS tunnel. You can start and stop it from the GitHub mobile app.
+## 1. Install
 
-The default model is `auto`. You do not need a provider/model key just to create the gateway account or obtain its unified API key. Real chat generation will work after a provider is enabled later.
+The Codespaces devcontainer runs the official Hermes installer from Nous Research. If you need to install or repair it manually on Linux, use the upstream command:
 
-## 1. Add admin login secrets once
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+source ~/.bashrc
+hermes doctor
+```
 
-Open **Repository → Settings → Secrets and variables → Actions → New repository secret** and add:
+Official installer and documentation: https://github.com/NousResearch/hermes-agent
 
-- `FREELLMAPI_ADMIN_EMAIL` — the email you want to use for the FreeLLMAPI dashboard.
-- `FREELLMAPI_ADMIN_PASSWORD` — a strong password of at least 8 characters.
+## 2. Configure the model
 
-These are used to provision the first dashboard account. They are not provider keys and are not printed in workflow logs.
+Run:
 
-## 2. Start the FreeLLMAPI host
+```bash
+hermes setup
+```
 
-In GitHub mobile:
+Use the setup wizard's **Custom Endpoint** option for an OpenAI-compatible API. For the Numes AI endpoint currently selected for this project, use:
 
-1. Open this repository → **Actions**.
-2. Select **FreeLLMAPI Temporary Host**.
-3. Tap **Run workflow** and keep model as `auto`.
-4. Open the completed/running workflow run and expand **Summary**.
-5. Copy the HTTPS Dashboard / API address shown there.
+```
+https://api.numes.ai/api/v1
+```
 
-The host stays online while that workflow run is active. Stop the run when finished. This is a temporary session, not persistent hosting; a new run creates a fresh instance.
+Enter the exact model identifier supplied by the provider and the API key in the interactive prompt. Do not put keys in repository files, shell history, screenshots, or commits. If the provider's model ID or endpoint changes, use `hermes model` to reconfigure.
 
-## 3. Get the unified API key
+There is no automatic paid fallback. If the selected provider is unavailable or out of credits, Hermes should report the error rather than silently switching to a paid provider.
 
-Open the HTTPS address from the workflow Summary and sign in with the admin email/password you saved in Step 1. On the FreeLLMAPI Keys page, copy the unified API key from the page header.
+## 3. Telegram
 
-The unified key is the gateway credential. It is separate from any provider/model key.
+Use Hermes' own gateway setup:
 
-## 4. Connect the repository workflows
+```bash
+hermes gateway setup
+```
 
-Add these two more repository Actions secrets:
+Select Telegram and enter the bot token when prompted. Keep the token private. Then run the gateway in the foreground:
 
-- `FREELLMAPI_BASE_URL` — the HTTPS address from the workflow Summary, without a trailing slash and without `/v1`.
-- `FREELLMAPI_API_KEY` — the unified API key from the FreeLLMAPI dashboard.
+```bash
+hermes gateway run
+```
 
-Then run **Actions → FreeLLMAPI Connection Check** with model `auto`. After it passes, run **Hermes Task** or **YouTube Documentary Pack**.
+The foreground process ends when the Codespace stops or the terminal process exits. Do not treat this as a permanent bot host.
 
-## 5. Add a model later
+## 4. Browser / dashboard access
 
-When ready, add a provider key/model inside the FreeLLMAPI dashboard. The unified API key remains the gateway key; it is not a replacement for a provider key.
+Use the dashboard/web-app instructions for the exact Hermes version installed:
 
-## Free-first notes
+https://hermes-agent.nousresearch.com/docs
 
-- Official image: `ghcr.io/tashfeenahmed/freellmapi:latest`.
-- Data is held in the runner's Docker volume for that session; this temporary host does not provide durable storage between runs.
-- No paid provider fallback is configured.
+Do not expose an unauthenticated dashboard to the public internet. Prefer private access or a properly authenticated remote connection. Never disable authentication merely to make a public port work.
+
+## 5. Native capabilities
+
+Prefer Hermes' built-in functionality rather than building duplicate systems:
+
+- Native gateway adapters for supported messaging platforms
+- Native sessions and memory
+- Native subagents and delegation
+- Native skills and MCP integrations
+- Native cron scheduler
+- Native CLI and dashboard/web interface where supported by the installed version
+
+Concurrency depends on the selected model provider's limits and available compute. Do not assume ten concurrent subagents will always be available.
+
+## 6. Runtime and persistence reality
+
+GitHub Codespaces is temporary compute. Files in the repository are versioned, but runtime state, active processes, and uncommitted data should not be assumed to survive deletion or recreation of a Codespace. Keep Hermes state in its supported persistent home/volume when using a host that provides persistent storage.
+
+GitHub Actions are short-lived workflow runners and are not a replacement for an always-on gateway.
+
+A device that is powered off or disconnected cannot execute local commands. A queue-and-resume workflow for Windows/Kali/Android requires a separate authenticated worker/relay that reconnects and drains queued jobs; it is not created by this repository and must be implemented and tested before being promised.
+
+## 7. Secrets checklist
+
+- Never commit `.env`, `.env.*`, Telegram tokens, provider API keys, passwords, or session files.
+- Use interactive Hermes setup or the host's encrypted secret store.
+- Rotate any credential that is accidentally committed.
+- Keep the repository private while configuring it.
