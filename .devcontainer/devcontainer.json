@@ -1,0 +1,14 @@
+{
+  "name": "Hermes Agent (GitHub Codespaces)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "forwardPorts": [9120],
+  "portsAttributes": {
+    "9120": {
+      "label": "Hermes Webapp",
+      "onAutoForward": "notify",
+      "visibility": "private"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "remoteUser": "vscode"
+}
